@@ -7,6 +7,7 @@ class DependenciesMiddlewareTest < ActiveSupport::TestCase
 
   context "on GET to index" do
     setup do
+      V1MarshaledDepedencies::CACHE.flush
       @versions = [create(:version), create(:version)].each do |version|
         create(:dependency, :version => version)
       end
@@ -32,6 +33,22 @@ class DependenciesMiddlewareTest < ActiveSupport::TestCase
         assert_kind_of Array, hash[:dependencies]
         assert_equal 1, hash[:dependencies].size
       end
+    end
+
+    should "not call Dalli::Client#get" do
+      dont_allow(V1MarshaledDepedencies::CACHE).get
+      get "/api/v1/dependencies",
+          :gems => @versions.map(&:rubygem).map(&:name).join(',')
+    end
+
+    should "return Marshalled array of hashes from cache" do
+      get "/api/v1/dependencies",
+          :gems => @versions.map(&:rubygem).map(&:name).join(',')
+      assert_equal 200, last_response.status
+
+      array = Marshal.load(last_response.body)
+      assert_kind_of Array, array
+      array.each {|hash| assert_kind_of Hash, hash }
     end
   end
 

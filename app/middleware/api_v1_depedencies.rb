@@ -49,32 +49,28 @@ class V1MarshaledDepedencies
 
     return TooMany if gems.size > LIMIT
 
-    ary = []
-    cache = CACHE.clone
-
-    gems.each do |g|
-      begin
-        data = cache.get "gem.#{g}"
-        if data
-          ary += Marshal.load(data)
-        else
-          begin
-            data_for g, ary, cache
-          rescue
-            return BadRequest
-          end
-        end
-      rescue Dalli::RingError
-        begin
-          data_for g, ary, nil
-        rescue
-          return BadRequest
-        end
-      end
+    ary = catch :bad_request do
+      acquire gems, CACHE.clone
     end
+
+    return BadRequest unless ary
 
     body = Marshal.dump ary
 
     [200, {}, [body]]
+  end
+
+  def acquire(gems, cache)
+    ary = cache.get_multi(*gems.map { |g| "gem.#{g}" }).values.flat_map { |e| Marshal.load e }
+    cache.multi do
+      (gems - ary.map { |e| e[:name] }).each do |g|
+        begin
+          data_for g, ary, cache
+        rescue
+          throw :bad_request
+        end
+      end
+    end
+    ary
   end
 end
